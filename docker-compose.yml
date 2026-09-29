@@ -1,0 +1,134 @@
+services:
+  llama-swap:
+    image: ghcr.io/mostlygeek/llama-swap:unified-cuda13
+    container_name: llama-swap
+    gpus: all
+    runtime: nvidia
+    ports:
+      - "9292:8080"
+    volumes:
+      - ./models:/models
+    environment:
+      LLAMA_SWAP_CONFIG: /models/llama-swap.yaml
+      LLAMA_SWAP_LISTEN: 0.0.0.0:8080
+      LLAMA_SWAP_WATCH_CONFIG: true
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+      ARC_AI_API_KEY: ${ARC_AI_API_KEY}
+    env_file: .env
+    networks:
+      - llama-swap
+
+  vllm-qwen-spark:
+    image: qwen3.8-flash-dgx
+    build: ./qwen3.8-Flash-DGX          # built from the repo's Dockerfile
+    container_name: vllm-qwen-spark
+    restart: unless-stopped
+    ports:
+      - "18300:8000"                  # OpenAI-compatible API
+    shm_size: "16g"
+    ipc: host
+    gpus: all
+    volumes:
+      # Where scripts/download-weights.sh put the checkpoint
+      - ./models/.cache/huggingface:/hf
+      - ./start_vllm.sh:/usr/local/bin/start_vllm.sh
+    environment:
+      HF_HOME: /hf
+      HF_HUB_OFFLINE: "1"
+      # PLE (n-gram) table served from NVMe via mmap — the core of the recipe
+      VLLM_PLE_MMAP: "1"
+      VLLM_PLE_MMAP_WORKERS: "32"
+      VLLM_PLE_MMAP_PREWARM: "0"      # 1 = stream the 48 GiB table once at boot
+      VLLM_PLE_MMAP_MADVISE: random
+      VLLM_PLE_MMAP_FAST_ROWS: "0"
+      # Deterministic QSA top-k kernel + reduced MTP draft vocabulary
+      VLLM_QSA_DET_TOPK: "1"
+      VLLM_QSA_DET_LIB: /opt/llm/kernel-det/_C_det.so
+      VLLM_QSA_EXACT_TOPK: "0"
+      VLLM_MTP_DRAFT_VOCAB: /opt/llm/draft_vocab_65536.npy
+      VLLM_FP8_PAD_M4: "0"
+      VLLM_USE_FLASHINFER_SAMPLER: "1"
+      VLLM_ALLOW_LONG_MAX_MODEL_LEN: "0"
+    entrypoint: []
+    command:
+      - "/usr/local/bin/start_vllm.sh"
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8000/health',timeout=5)"]
+      interval: 1m
+      timeout: 10s
+      retries: 10
+      start_period: 15m
+    networks:
+      - llama-swap
+
+  vllm-qwen:
+    image: vllm/vllm-openai:latest 
+    container_name: vllm-quen
+    restart: unless-stopped
+    entrypoint: []
+    command:
+      - vllm
+      - serve
+      - unsloth/Qwen3.8-27B-NVFP4
+      - --served-model-name
+      - qwen3.8-27b
+      - --kv-cache-dtype
+      - fp8
+      - --gpu-memory-utilization
+      - "0.7"
+      - --max-model-len
+      - "262144"
+      - --max-num-seqs
+      - "8"
+      - --max-num-batched-tokens
+      - "8192"
+      - --enable-chunked-prefill
+      - --async-scheduling
+      - --enable-prefix-caching
+      - --load-format
+      - fastsafetensors
+      - --tensor-parallel-size
+      - "1"
+      - --enable-auto-tool-choice
+      - --tool-call-parser
+      - qwen3_xml
+      - --reasoning-parser
+      - qwen3
+      - --mm-encoder-tp-mode
+      - data
+      - --speculative-config
+      - '{"method":"mtp","num_speculative_tokens":5}'
+    ports:
+      - "8001:8000"
+    volumes:
+      - ./models/hub:/root/.cache/huggingface/hub
+    ipc: host
+    ulimits:
+      memlock: -1
+      stack: 67108864
+    gpus: all   # compose v2.30+ shorthand
+    networks:
+      - llama-swap
+
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: open-webui
+    ports:
+      - "3000:8080"
+    volumes:
+      - open-webui:/app/backend/data
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    environment:
+      - WEBUI_SECRET_KEY=${WEB_UI_SECRET_KEY}
+    env_file: .env
+    restart: unless-stopped
+    networks:
+      - llama-swap
+
+volumes:
+  open-webui:
+networks:
+  llama-swap:
+    driver: bridge

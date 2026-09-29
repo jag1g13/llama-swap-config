@@ -1,0 +1,44 @@
+logLevel: debug
+logToStdout: both # shows llama-server's own output in docker logs — you want this now
+healthCheckTimeout: 300
+
+  # proxy:
+  # log_level: info
+
+models:
+  gemma-4-E4B:
+    name: "Gemma 4 E4B"
+    cmd: |
+      llama-server
+      --port ${PORT}
+      --model /models/gemma-4-E4B-it-UD-Q4_K_XL.gguf
+      --model-draft /models/mtp-gemma-4-E4B-it.gguf
+      --spec-type draft-mtp
+      --spec-draft-n-max 2
+      --jinja
+      -ngl 99
+      --flash-attn on
+      --ctx-size 32768
+      --temp 1.0
+      --top-p 0.95
+      --top-k 64
+    capabilities:
+      # vision: true       # only if mmproj is actually present
+      tools: true
+
+peers:
+  # vllm-qwen:
+  #   proxy: http://vllm-qwen:8000
+  #   models:
+  #     - qwen3.8-27b
+  vllm-qwen-spark:
+    proxy: http://vllm-qwen-spark:8000
+    models:
+      - qwen3.8-flash-next
+  arc-ai:
+    proxy: ${env.ARC_AI_BASE_URL}
+    apiKey: ${env.ARC_AI_API_KEY}
+    models:
+      - arc:apex
+      - arc:nexus
+      - arc:chat
