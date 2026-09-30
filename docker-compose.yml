@@ -40,6 +40,10 @@ services:
     environment:
       HF_HOME: /hf
       HF_HUB_OFFLINE: "1"
+      # hybrid checkpoint (scripts/prepare-hybrid.sh): ModelOpt shim for the
+      # blockwise-fp8 side layers; DeepGEMM has no blockwise-fp8 path on GB10
+      VLLM_FP8_HYBRID: "1"
+      VLLM_USE_DEEP_GEMM: "0"
       # PLE (n-gram) table served from NVMe via mmap — the core of the recipe
       VLLM_PLE_MMAP: "1"
       VLLM_PLE_MMAP_WORKERS: "32"
