@@ -37,6 +37,11 @@ services:
       # Where scripts/download-weights.sh put the checkpoint
       - ./models/.cache/huggingface:/hf
       - ./start_vllm.sh:/usr/local/bin/start_vllm.sh
+      # persistent JIT/compile caches (vLLM, FlashInfer, Triton, CUDA PTX) — ~37s faster boots
+      - ./compile-cache/vllm:/root/.cache/vllm
+      - ./compile-cache/flashinfer:/root/.cache/flashinfer
+      - ./compile-cache/triton:/root/.triton
+      - ./compile-cache/nv:/root/.nv
     environment:
       HF_HOME: /hf
       HF_HUB_OFFLINE: "1"
@@ -55,7 +60,6 @@ services:
       VLLM_QSA_DET_LIB: /opt/llm/kernel-det/_C_det.so
       VLLM_QSA_EXACT_TOPK: "0"
       VLLM_MTP_DRAFT_VOCAB: /opt/llm/draft_vocab_65536.npy
-      VLLM_FP8_PAD_M4: "0"
       VLLM_USE_FLASHINFER_SAMPLER: "1"
       VLLM_ALLOW_LONG_MAX_MODEL_LEN: "0"
     entrypoint: []

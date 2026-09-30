@@ -3,3 +3,4 @@ bin/
 models/*.gguf
 models/hub/
 models/.cache/
+compile-cache/
