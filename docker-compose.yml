@@ -8,6 +8,8 @@ services:
       - "9292:8080"
     volumes:
       - ./models:/models
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./bin/docker:/usr/local/bin/docker:ro
     environment:
       LLAMA_SWAP_CONFIG: /models/llama-swap.yaml
       LLAMA_SWAP_LISTEN: 0.0.0.0:8080
@@ -23,7 +25,9 @@ services:
     image: qwen3.8-flash-dgx
     build: ./qwen3.8-Flash-DGX          # built from the repo's Dockerfile
     container_name: vllm-qwen-spark
-    restart: unless-stopped
+    # lifecycle managed by llama-swap (cmd/cmdStop) — compose never starts it
+    restart: "no"
+    profiles: ["on-demand"]
     ports:
       - "18300:8000"                  # OpenAI-compatible API
     shm_size: "16g"
@@ -64,8 +68,10 @@ services:
 
   vllm-qwen:
     image: vllm/vllm-openai:latest 
-    container_name: vllm-quen
-    restart: unless-stopped
+    container_name: vllm-qwen
+    # lifecycle managed by llama-swap (cmd/cmdStop) — compose never starts it
+    restart: "no"
+    profiles: ["on-demand"]
     entrypoint: []
     command:
       - vllm

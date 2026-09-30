@@ -1,6 +1,6 @@
 logLevel: debug
 logToStdout: both # shows llama-server's own output in docker logs — you want this now
-healthCheckTimeout: 300
+healthCheckTimeout: 900 # qwen3.8-flash-next cold-starts load ~103 GiB of weights
 
   # proxy:
   # log_level: info
@@ -26,15 +26,50 @@ models:
       # vision: true       # only if mmproj is actually present
       tools: true
 
-peers:
-  # vllm-qwen:
-  #   proxy: http://vllm-qwen:8000
-  #   models:
-  #     - qwen3.8-27b
-  vllm-qwen-spark:
+  # vLLM backends run as compose containers (profiles: ["on-demand"]) that
+  # llama-swap starts/stops via the docker CLI. ttl: 0 = never idle-stop;
+  # they are stopped only when another model is loaded or via manual unload.
+  qwen3.8-flash-next:
+    name: "Qwen3.8 Flash Next"
+    cmd: sh -c 'docker start vllm-qwen-spark 2>/dev/null; docker attach --no-stdin vllm-qwen-spark'
+    cmdStop: docker stop -t 60 vllm-qwen-spark
     proxy: http://vllm-qwen-spark:8000
-    models:
-      - qwen3.8-flash-next
+    checkEndpoint: /health
+    ttl: 0
+    unloadTimeout: 120
+
+  qwen3.8-27b:
+    name: "Qwen3.8 27B"
+    cmd: sh -c 'docker start vllm-qwen 2>/dev/null; docker attach --no-stdin vllm-qwen'
+    cmdStop: docker stop -t 60 vllm-qwen
+    proxy: http://vllm-qwen:8000
+    checkEndpoint: /health
+    ttl: 0
+    unloadTimeout: 120
+
+# Keep qwen3.8-flash-next warm whenever the requested model fits next to it.
+# llama-swap picks the allowed set that evicts the least (evict_costs).
+# - adding a small GGUF model? give it a set with flash so it coexists
+# - big models need no set: they can only run alone, so they evict flash
+routing:
+  router:
+    use: matrix
+    settings:
+      matrix:
+        vars:
+          flash: qwen3.8-flash-next
+          big27: qwen3.8-27b
+        evict_costs:
+          qwen3.8-flash-next: 50 # ~13 min cold start — evict only if it must
+          qwen3.8-27b: 20
+        sets:
+          # gemma is small enough to run alongside either vLLM
+          with-vllm: "(flash | big27) & gemma-4-E4B"
+          # template for future small unsloth models:
+          # new-model: "flash & new-model-id"
+
+peers:
+  # vllm-qwen / vllm-qwen-spark are now managed models above (start/stop on demand)
   arc-ai:
     proxy: ${env.ARC_AI_BASE_URL}
     apiKey: ${env.ARC_AI_API_KEY}
