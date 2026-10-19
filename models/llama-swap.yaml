@@ -26,6 +26,27 @@ models:
       # vision: true       # only if mmproj is actually present
       tools: true
 
+  lfm2.5-24b-a2b:
+    name: "LFM2.5-24B-A2B"
+    cmd: |
+      llama-server
+      --port ${PORT}
+      --model /models/LFM2.5-24B-A2B-UD-Q4_K_XL.gguf
+      # --model-draft /models/mtp-gemma-4-E4B-it.gguf
+      # --spec-type draft-mtp
+      # --spec-draft-n-max 2
+      # --jinja
+      # -ngl 99
+      # --flash-attn on
+      --ctx-size 131072
+      --temp 0.1
+      # --top-p 0.95
+      --top-k 50
+      --repeat-penalty 1.05
+    capabilities:
+      # vision: true       # only if mmproj is actually present
+      tools: true
+
   # vLLM backends run as compose containers (profiles: ["on-demand"]) that
   # llama-swap starts/stops via the docker CLI. ttl: 0 = never idle-stop;
   # they are stopped only when another model is loaded or via manual unload.
@@ -37,6 +58,8 @@ models:
     checkEndpoint: /health
     ttl: 0
     unloadTimeout: 120
+    capabilities:
+      context: 262144
 
   qwen3.8-27b:
     name: "Qwen3.8 27B"
@@ -64,7 +87,7 @@ routing:
           qwen3.8-27b: 20
         sets:
           # gemma is small enough to run alongside either vLLM
-          with-vllm: "(flash | big27) & gemma-4-E4B"
+          with-vllm: "(flash | big27) & (gemma-4-E4B | lfm2.5-24b-a2b)"
           # template for future small unsloth models:
           # new-model: "flash & new-model-id"
 
