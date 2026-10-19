@@ -1,0 +1,3 @@
+[submodule "qwen3.8-Flash-DGX"]
+	path = qwen3.8-Flash-DGX
+	url = https://github.com/blazux/qwen3.8-Flash-DGX.git
