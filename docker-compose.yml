@@ -17,6 +17,7 @@ services:
       NVIDIA_VISIBLE_DEVICES: all
       NVIDIA_DRIVER_CAPABILITIES: compute,utility
       ARC_AI_API_KEY: ${ARC_AI_API_KEY}
+      ARC_AI_BASE_URL: ${ARC_AI_BASE_URL}
     env_file: .env
     networks:
       - llama-swap
