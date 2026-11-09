@@ -56,11 +56,12 @@ services:
       VLLM_PLE_MMAP_PREWARM: "0"      # 1 = stream the 48 GiB table once at boot
       VLLM_PLE_MMAP_MADVISE: random
       VLLM_PLE_MMAP_FAST_ROWS: "0"
-      # Deterministic QSA top-k kernel + reduced MTP draft vocabulary
+      # Deterministic QSA top-k kernel; V2 model runner for the NVFP4 MTP
+      # proposal head (mtp-fast). Full draft vocab - no reduced-vocab prune.
       VLLM_QSA_DET_TOPK: "1"
       VLLM_QSA_DET_LIB: /opt/llm/kernel-det/_C_det.so
       VLLM_QSA_EXACT_TOPK: "0"
-      VLLM_MTP_DRAFT_VOCAB: /opt/llm/draft_vocab_65536.npy
+      VLLM_USE_V2_MODEL_RUNNER: "1"
       VLLM_USE_FLASHINFER_SAMPLER: "1"
       VLLM_ALLOW_LONG_MAX_MODEL_LEN: "0"
     entrypoint: []
