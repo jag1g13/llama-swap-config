@@ -1,6 +1,11 @@
 .env
 bin/
 models/*.gguf
+models/*.bin
+.cauldron/
 models/hub/
 models/.cache/
+models/.state/
+models/weights/
+compile-cache-diffusion/
 compile-cache/

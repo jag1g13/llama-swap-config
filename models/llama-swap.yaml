@@ -1,6 +1,9 @@
 logLevel: debug
-logToStdout: both # shows llama-server's own output in docker logs — you want this now
+logToStdout: both # shows llama-server's own output in docker logs - you want this now
 healthCheckTimeout: 900 # qwen3.8-flash-next cold-starts load ~103 GiB of weights
+captureBuffer: 0 # keep activity/metrics, store no request/response bodies
+store:
+  path: /models/.state/activity.sqlite # durable activity + timing metrics across restarts
 
   # proxy:
   # log_level: info
@@ -31,13 +34,9 @@ models:
     cmd: |
       llama-server
       --port ${PORT}
-      --model /models/LFM2.5-24B-A2B-UD-Q4_K_XL.gguf
-      # --model-draft /models/mtp-gemma-4-E4B-it.gguf
-      # --spec-type draft-mtp
-      # --spec-draft-n-max 2
-      # --jinja
-      # -ngl 99
-      # --flash-attn on
+      --model /models/lfm2.5-24b-a2b-nvfp4.gguf
+      # no draft: the gemma MTP drafter has a different vocab (262k vs this model's 128k)
+      # -ngl, --flash-attn and --jinja default to auto / auto / enabled in this build
       --ctx-size 131072
       --temp 0.1
       # --top-p 0.95
@@ -46,6 +45,7 @@ models:
     capabilities:
       # vision: true       # only if mmproj is actually present
       tools: true
+      context: 131072
 
   # vLLM backends run as compose containers (profiles: ["on-demand"]) that
   # llama-swap starts/stops via the docker CLI. ttl: 0 = never idle-stop;
@@ -60,6 +60,7 @@ models:
     unloadTimeout: 120
     capabilities:
       context: 262144
+      vision: true
 
   qwen3.8-27b:
     name: "Qwen3.8 27B"
@@ -69,6 +70,78 @@ models:
     checkEndpoint: /health
     ttl: 0
     unloadTimeout: 120
+
+  # whisper.cpp server from the unified image, GPU (CUDA) by default.
+  # OpenAI-compatible: POST /v1/audio/transcriptions with model="whisper".
+  # ~1 GiB VRAM, fast boot - coexists with everything (see routing sets).
+  whisper:
+    name: "Whisper small.en (STT)"
+    aliases:
+      - whisper-small.en
+    cmd: |
+      whisper-server
+      --host 127.0.0.1
+      --port ${PORT}
+      -m /models/ggml-small.en.bin
+      --request-path /v1/audio/transcriptions
+      --inference-path ""
+    checkEndpoint: /v1/audio/transcriptions/
+    ttl: 0
+
+  # Whisper large-v3-turbo (STT), Q8_0. Heavier STT than small.en, so its
+  # routing sets exclude the other STT models - loading it evicts whisper +
+  # granite, and loading those evicts it (see routing sets).
+  whisper-large-v3-turbo:
+    name: "Whisper Large-v3-turbo (STT)"
+    aliases:
+      - large-v3-turbo
+      - whisper-turbo
+    cmd: |
+      whisper-server
+      --host 127.0.0.1
+      --port ${PORT}
+      -m /models/ggml-large-v3-turbo-q8_0.bin
+      --request-path /v1/audio/transcriptions
+      --inference-path ""
+    checkEndpoint: /v1/audio/transcriptions/
+    ttl: 0
+
+  # IBM Granite Speech 5.0 2B - multilingual ASR + speech translation (STT).
+  # NOT whisper.cpp: it's a conformer encoder + Granite-4 LLM, so it runs on
+  # llama-server with the audio encoder loaded as an mmproj (unified image).
+  # OpenAI-compatible: POST /v1/audio/transcriptions. ~3 GiB, rides along with
+  # the vLLM models (see routing sets). Greedy (temp 0) for deterministic text.
+  granite-speech-5.0-2b:
+    name: "Granite Speech 5.0 2B (STT)"
+    aliases:
+      - granite-speech
+      - granite-speech-5.0
+    cmd: |
+      llama-server
+      --port ${PORT}
+      --model /models/granite-speech-5.0-2b-Q8_0.gguf
+      --mmproj /models/granite-speech-5.0-2b-mmproj-model-f16.gguf
+      --jinja
+      -ngl 99
+      --flash-attn on
+      --ctx-size 8192
+      --temp 0.0
+    ttl: 0
+    capabilities:
+      context: 8192
+
+  # NVFP4 diffusion LLM (vLLM). 17.5 GiB of weights + KV, so it gets no routing
+  # set: it can only run alone and therefore evicts flash.
+  diffusiongemma-26b-a4b:
+    name: "DiffusionGemma 26B-A4B NVFP4"
+    cmd: sh -c 'docker start vllm-diffusion 2>/dev/null; docker attach --no-stdin vllm-diffusion'
+    cmdStop: docker stop -t 60 vllm-diffusion
+    proxy: http://vllm-diffusion:8000
+    checkEndpoint: /health
+    ttl: 0
+    unloadTimeout: 120
+    capabilities:
+      context: 32768
 
 # Keep qwen3.8-flash-next warm whenever the requested model fits next to it.
 # llama-swap picks the allowed set that evicts the least (evict_costs).
@@ -82,12 +155,25 @@ routing:
         vars:
           flash: qwen3.8-flash-next
           big27: qwen3.8-27b
+          stt: whisper
+          granite: granite-speech-5.0-2b
+          turbo: whisper-large-v3-turbo
         evict_costs:
-          qwen3.8-flash-next: 50 # ~13 min cold start — evict only if it must
+          qwen3.8-flash-next: 50 # ~13 min cold start - evict only if it must
           qwen3.8-27b: 20
+          diffusiongemma-26b-a4b: 15 # small weights, quick boot, but not warm
+          whisper: 5 # ~1 GiB VRAM, boots in seconds, but no reason to evict it
+          granite-speech-5.0-2b: 5 # ~3 GiB, quick boot - rides along, cheap to evict
+          whisper-large-v3-turbo: 5 # ~0.8 GiB Q8_0, quick boot - evicts the other STT models
         sets:
-          # gemma is small enough to run alongside either vLLM
-          with-vllm: "(flash | big27) & (gemma-4-E4B | lfm2.5-24b-a2b)"
+          # gemma is small enough to run alongside either vLLM;
+          # whisper + granite ride along with everything (subsets are allowed)
+          with-vllm: "(flash | big27) & (gemma-4-E4B | lfm2.5-24b-a2b) & stt & granite"
+          with-diffusion: "diffusiongemma-26b-a4b & stt & granite"
+          # turbo rides with the big model + GGUF but NOT the other STT models,
+          # so loading it evicts whisper + granite (and loading them evicts it)
+          with-vllm-turbo: "(flash | big27) & (gemma-4-E4B | lfm2.5-24b-a2b) & turbo"
+          with-diffusion-turbo: "diffusiongemma-26b-a4b & turbo"
           # template for future small unsloth models:
           # new-model: "flash & new-model-id"
 

@@ -75,6 +75,55 @@ services:
     networks:
       - llama-swap
 
+  vllm-diffusion:
+    image: vllm/vllm-openai:latest          # arm64, vLLM ships DiffusionGemmaForBlockDiffusion
+    container_name: vllm-diffusion
+    # lifecycle managed by llama-swap (cmd/cmdStop) — compose never starts it
+    restart: "no"
+    profiles: ["on-demand"]
+    entrypoint: []
+    command:
+      - vllm
+      - serve
+      - /weights/diffusiongemma-26B-A4B-it-NVFP4
+      - --served-model-name
+      - diffusiongemma-26b-a4b
+      - --host
+      - "0.0.0.0"
+      - --max-model-len
+      - "32768"
+      - --max-num-seqs
+      - "8"
+      - --gpu-memory-utilization
+      - "0.75"
+      - --max-num-batched-tokens
+      - "8192"
+      - --enable-chunked-prefill
+      - --enable-prefix-caching
+      # the diffusion (non-causal) attention path trips the FlashInfer builder on v0.29
+      - --attention-backend
+      - TRITON_ATTN
+    ports:
+      - "18301:8000"
+    volumes:
+      - ./models/weights:/weights:ro
+      - ./compile-cache-diffusion/vllm:/root/.cache/vllm
+      - ./compile-cache-diffusion/triton:/root/.triton
+      - ./compile-cache-diffusion/nv:/root/.nv
+    environment:
+      HF_HUB_OFFLINE: "1"
+    shm_size: "8g"
+    ipc: host
+    gpus: all
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8000/health',timeout=5)"]
+      interval: 1m
+      timeout: 10s
+      retries: 10
+      start_period: 15m
+    networks:
+      - llama-swap
+
   vllm-qwen:
     image: vllm/vllm-openai:latest 
     container_name: vllm-qwen
